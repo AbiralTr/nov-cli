@@ -53,37 +53,71 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     try:
         if args.cont:
-            entry = state.most_recent()
-            if not entry:
-                err_console.print("[yellow]No reading history yet.[/yellow]")
-                sys.exit(1)
-            chapter = site.get_chapter_by_url(entry["url"])
-            _read_session(site, entry["slug"], chapter)
+            _resume(site)
             return
 
-        if not args.query:
-            err_console.print("[yellow]Usage:[/yellow] nov <novel title>   (or: nov -c / nov --history)")
-            sys.exit(1)
+        if args.query:
+            # One-shot mode: `nov shadow slave [-e N]` — read once, then exit.
+            _search_flow(site, " ".join(args.query), chapter_number=args.chapter)
+            return
 
-        query = " ".join(args.query)
-        results = site.search(query)
-
-        if not results:
-            err_console.print(f"[yellow]No results for[/yellow] '{query}'")
-            sys.exit(1)
-
-        result = _pick_result(results)
-        slug = result.slug
-
-        if args.chapter:
-            chapter = site.get_chapter(slug, args.chapter)
-        else:
-            chapter = _pick_starting_chapter(site, slug)
-
-        _read_session(site, slug, chapter)
+        _repl(site)
     except requests.RequestException as exc:
         _print_network_error(exc)
         sys.exit(1)
+    except (KeyboardInterrupt, EOFError):
+        console.print()
+
+
+def _repl(site: Site) -> None:
+    """Interactive front door: `nov` with no arguments drops you into a
+    prompt where you can search repeatedly without re-invoking the command."""
+    console.print("[bold cyan]nov-cli[/bold cyan] — type a novel title to search.")
+    console.print("[dim]Commands: c = continue last read, history, q = quit[/dim]")
+    while True:
+        raw = console.input("\n[bold]search>[/bold] ").strip()
+        cmd = raw.lower()
+        if cmd in ("q", "quit", "exit", ""):
+            break
+        elif cmd in ("c", "continue"):
+            _resume(site, quiet_if_missing=True)
+        elif cmd in ("h", "history"):
+            _print_history()
+        else:
+            try:
+                _search_flow(site, raw)
+            except requests.RequestException as exc:
+                _print_network_error(exc)
+
+
+def _resume(site: Site, quiet_if_missing: bool = False) -> None:
+    entry = state.most_recent()
+    if not entry:
+        if quiet_if_missing:
+            console.print("[yellow]No reading history yet.[/yellow]")
+            return
+        err_console.print("[yellow]No reading history yet.[/yellow]")
+        sys.exit(1)
+    chapter = site.get_chapter_by_url(entry["url"])
+    _read_session(site, entry["slug"], chapter)
+
+
+def _search_flow(site: Site, query: str, chapter_number: Optional[int] = None) -> None:
+    results = site.search(query)
+
+    if not results:
+        console.print(f"[yellow]No results for[/yellow] '{query}'")
+        return
+
+    result = _pick_result(results)
+    slug = result.slug
+
+    if chapter_number:
+        chapter = site.get_chapter(slug, chapter_number)
+    else:
+        chapter = _pick_starting_chapter(site, slug)
+
+    _read_session(site, slug, chapter)
 
 
 def _pick_result(results: list[SearchResult]) -> SearchResult:

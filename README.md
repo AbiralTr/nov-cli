@@ -1,8 +1,8 @@
 # nov-cli
 
-A terminal webnovel reader. Search a site, pick a novel, pick a chapter, read — with `n`/`p` to move between chapters. Inspired by [ani-cli](https://github.com/pystardust/ani-cli), but for text instead of video.
+A terminal reader for webnovels. Search a site, pick a result, pick a chapter, read. Press `n` or `p` to move between chapters without leaving the terminal. It's inspired by [ani-cli](https://github.com/pystardust/ani-cli), just for text instead of video.
 
-nov-cli doesn't host or bundle any novel content — it scrapes pages on demand from sites you point it at and renders them in your terminal. Currently supported:
+nov-cli doesn't host or bundle any novel content. It fetches pages on demand from a site you point it at and renders them where you're reading. Right now that's one site:
 
 - [Novel Phoenix](https://novelphoenix.com)
 
@@ -14,42 +14,49 @@ cd nov-cli
 pip install -e .
 ```
 
-This installs a `nov` command (via `pyproject.toml`'s `[project.scripts]`). Requires Python 3.9+.
+That gives you a `nov` command, defined in `pyproject.toml`'s `[project.scripts]`. Needs Python 3.9+. If you'd rather it live outside any one project's venv, `pipx install -e .` puts it on your PATH globally.
 
 ## Usage
 
+Run `nov` with no arguments and you're dropped into a prompt:
+
 ```sh
-nov shadow slave          # search, pick a result, pick a starting chapter, start reading
-nov shadow slave -e 42    # search, then jump straight to chapter 42
-nov -c                    # resume the last novel/chapter you were reading
-nov --history             # list everything you've read so far
+$ nov
+nov-cli — type a novel title to search.
+Commands: c = continue last read, history, q = quit
+
+search> shadow slave
 ```
 
-While reading:
+Type a title, pick a result, pick where to start reading, and go. `n`/`p` move you between chapters; `q` backs out of the chapter and drops you at `search>` again, so you can look something else up without relaunching the command. `c` resumes wherever you last left off, `history` lists everything you've read, and `q` at the prompt exits for real.
 
-- `n` — next chapter
-- `p` — previous chapter
-- `q` — quit
+If you already know what you want, skip the prompt:
 
-Progress is saved automatically after each chapter to `~/.local/state/nov-cli/history.json`, so `nov -c` always picks up where you left off.
+```sh
+nov shadow slave          # search, pick a result, pick a starting chapter
+nov shadow slave -e 42    # search, then jump straight to chapter 42
+nov -c                    # resume the last novel/chapter you were reading
+nov --history             # list everything you've read
+```
+
+Reading progress saves after every chapter to `~/.local/state/nov-cli/history.json`, so `nov -c` picks up exactly where you stopped.
 
 ## How it works
 
-Each site is a small adapter (`src/nov_cli/sites/<site>.py`) implementing a common interface: `search()`, `list_chapters()`, and `get_chapter()`/`get_chapter_by_url()`. The CLI and reader don't know anything about site-specific HTML — that's the adapter's job. Chapters are fetched fresh over HTTP each time; nothing is cached or redistributed.
+Each site lives in its own adapter, `src/nov_cli/sites/<site>.py`, implementing three methods: `search()`, `list_chapters()`, and `get_chapter()` (or `get_chapter_by_url()`). The CLI and the reader don't touch any site-specific HTML themselves — that's the adapter's job, and the only thing you'd need to write to support a new site. Nothing gets cached or redistributed; every chapter is fetched fresh.
 
-To add another site, drop a new adapter in `src/nov_cli/sites/`, implement `Site` from `sites/base.py`, and register it in `sites/__init__.py`'s `SITES` dict.
+To add a site: write a new adapter implementing `Site` from `sites/base.py`, then register it in the `SITES` dict in `sites/__init__.py`.
 
-## Notes
+## A note on scraping etiquette
 
-- This is a personal-use scraping tool, same spirit as ani-cli. Be a reasonable citizen of the sites you point it at — it already retries with backoff on rate limiting (HTTP 403/429), but don't hammer a site with rapid repeated requests.
-- Only reads novels that are already freely and publicly readable on the target site; it doesn't bypass paywalls, logins, or access controls.
+This is a personal reading tool, same spirit as ani-cli, not a bulk downloader. It retries with backoff if a site rate-limits you (HTTP 403/429), but that's a courtesy, not a license to hammer someone's server — space out your requests. It also only reads what's already freely visible on the page; it doesn't get around logins, paywalls, or anything else gating the content.
 
 ## Roadmap
 
-- [ ] More site adapters
-- [ ] `--site` fuzzy fallback / auto-detect which site a slug belongs to
-- [ ] Optional local export (e.g. to a text/EPUB file) for offline reading
-- [ ] Config file for defaults (pager, width, site)
+- More site adapters
+- Auto-detect which site a saved slug belongs to, for `--site`
+- Optional export to plain text or EPUB for offline reading
+- A config file for defaults (pager, width, default site)
 
 ## License
 
