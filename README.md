@@ -28,12 +28,14 @@ Commands: c = continue last read, history, q = quit
 search> shadow slave
 ```
 
-Type a title and pick a result, then choose where to start:
+Type a title and pick a result from the arrow-key menu, then choose where to start:
 
 - **Start from chapter 1** — no chapter list fetched, jumps straight in.
 - **Jump to latest chapter** — fetches the last page of the table of contents directly, not the pages before it.
 - **Pick a chapter number** — also skips the listing; goes straight to that chapter's page.
-- **Browse chapters** — an arrow-key menu over the table of contents, 50 chapters at a time; ←/→ jump a page back or forward directly. It only fetches enough of the listing to fill the page you're looking at, so paging through a 3,000-chapter novel doesn't mean waiting on the whole table of contents up front.
+- **Browse chapters** — a menu over the table of contents, 50 chapters at a time; ←/→ jump a page back or forward directly, no need to arrow down to a "next page" entry. It only fetches enough of the listing to fill the page you're looking at, so paging through a 3,000-chapter novel doesn't mean waiting on the whole table of contents up front.
+
+Escape backs out a level at every one of those menus — same as picking Cancel, just faster.
 
 From there, `n`/`p` move you between chapters, `b` reopens that same browse menu without losing your place, and `q` backs out of the chapter and drops you at `search>` again, so you can look something else up without relaunching the command. `c` resumes wherever you last left off, `history` lists everything you've read, and `q` at the prompt exits for real. The screen clears between chapters and browse pages, so you're never scrolling back through everything you've already read.
 

@@ -116,6 +116,9 @@ def _search_flow(site: Site, query: str, chapter_number: Optional[int] = None) -
         return
 
     result = _pick_result(results)
+    if result is None:
+        console.print("[dim]Cancelled.[/dim]")
+        return
     slug = result.slug
 
     if chapter_number:
@@ -130,19 +133,13 @@ def _search_flow(site: Site, query: str, chapter_number: Optional[int] = None) -
     _read_session(site, slug, chapter)
 
 
-def _pick_result(results: list[SearchResult]) -> SearchResult:
+def _pick_result(results: list[SearchResult]) -> Optional[SearchResult]:
     if len(results) == 1:
         console.print(f"[cyan]Found:[/cyan] {results[0].title}")
         return results[0]
 
-    table = Table(show_header=True, header_style="bold cyan")
-    table.add_column("#", justify="right")
-    table.add_column("Title")
-    for i, r in enumerate(results, start=1):
-        table.add_row(str(i), r.title)
-    console.print(table)
-
-    return results[_prompt_index("Pick a novel", len(results))]
+    choices = [questionary.Choice(r.title, value=r) for r in results]
+    return _select("Pick a novel", choices)
 
 
 def _pick_starting_chapter(site: Site, slug: str) -> Optional[Chapter]:
@@ -171,7 +168,7 @@ def _prompt_chapter_choice(site: Site, slug: str) -> Optional[Union[int, Chapter
     and it's paged instead of pulling the whole thing up front (a
     long-running novel's table of contents can be dozens of requests).
     Returns None if the user backs out (Ctrl-C/Esc or explicit Cancel)."""
-    answer = questionary.select(
+    answer = _select(
         "Where do you want to start?",
         choices=[
             questionary.Choice("Start from chapter 1", value="first"),
@@ -179,7 +176,7 @@ def _prompt_chapter_choice(site: Site, slug: str) -> Optional[Union[int, Chapter
             questionary.Choice("Pick a chapter number", value="number"),
             questionary.Choice("Browse chapters", value="browse"),
         ],
-    ).ask()
+    )
 
     if answer is None:
         return None
@@ -211,11 +208,18 @@ def _latest_chapter_ref(site: Site, slug: str) -> Optional[ChapterRef]:
     return last.chapters[-1] if last.chapters else (first.chapters[-1] if first.chapters else None)
 
 
-def _select_paged(title: str, choices: list, *, allow_prev: bool, allow_next: bool):
-    """Like questionary.select(), but Left/Right jump a page back/forward
-    directly — no need to arrow down to a "Previous"/"Next" entry first."""
+def _select(title: str, choices: list, *, allow_prev: bool = False, allow_next: bool = False):
+    """questionary.select() with two additions used at every menu layer:
+    Escape always backs out (returns None), and — when allowed — Left/Right
+    jump a page back/forward directly, no need to arrow down to a
+    "Previous"/"Next" entry first."""
     question = questionary.select(title, choices=choices)
     kb = question.application.key_bindings
+
+    @kb.add(Keys.Escape, eager=True)
+    def _go_back(event):
+        event.app.exit(result=None)
+
     if allow_prev:
         @kb.add(Keys.Left, eager=True)
         def _go_prev(event):
@@ -259,26 +263,23 @@ def _browse_chapters(site: Site, slug: str) -> Optional[Union[int, ChapterRef]]:
         has_prev = start > 0
         has_next = start + CHAPTERS_PER_PAGE < len(cache) or not exhausted
 
-        choices = []
-        if has_prev:
-            choices.append(questionary.Choice(f"◂ Previous Page", value=_PREV_PAGE))
-        for ref in window:
-            choices.append(questionary.Choice(f"{ref.number}. {ref.title}", value=ref))
-        if has_next:
-            choices.append(questionary.Choice(f"▸ Next Page", value=_NEXT_PAGE))
+        choices = [questionary.Choice(f"{ref.number}. {ref.title}", value=ref) for ref in window]
         choices.append(questionary.Choice("Jump to latest", value="__latest__"))
         choices.append(questionary.Choice("Pick a chapter number", value="__number__"))
-        choices.append(questionary.Choice("Cancel", value="__cancel__"))
+        choices.append(questionary.Choice("Cancel", value=None))
 
         known = f"{len(cache)}+" if not exhausted else str(len(cache))
         title = f"Chapters {start + 1}-{start + len(window)} of {known}"
+        hints = []
         if has_prev or has_next:
-            title += "  (←/→ to page)"
+            hints.append("←/→ to page")
+        hints.append("Esc to go back")
+        title += f"  ({', '.join(hints)})"
 
         console.clear()
-        answer = _select_paged(title, choices, allow_prev=has_prev, allow_next=has_next)
+        answer = _select(title, choices, allow_prev=has_prev, allow_next=has_next)
 
-        if answer in (None, "__cancel__"):
+        if answer is None:
             return None
         if answer == _NEXT_PAGE:
             start += CHAPTERS_PER_PAGE
@@ -291,14 +292,6 @@ def _browse_chapters(site: Site, slug: str) -> Optional[Union[int, ChapterRef]]:
         if answer == "__number__":
             return _prompt_chapter_number()
         return answer  # a ChapterRef the user picked directly
-
-
-def _prompt_index(prompt: str, count: int) -> int:
-    while True:
-        raw = console.input(f"[bold]{prompt} (1-{count}):[/bold] ").strip()
-        if raw.isdigit() and 1 <= int(raw) <= count:
-            return int(raw) - 1
-        console.print("[yellow]Invalid choice, try again.[/yellow]")
 
 
 def _read_session(site: Site, slug: str, chapter: Chapter) -> None:
