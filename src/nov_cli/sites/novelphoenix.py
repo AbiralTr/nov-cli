@@ -34,8 +34,10 @@ class NovelPhoenix(Site):
 
     def __init__(self, session: Optional[requests.Session] = None):
         self.session = session or requests.Session()
-        for key, value in DEFAULT_HEADERS.items():
-            self.session.headers.setdefault(key, value)
+        # requests.Session() pre-populates User-Agent/Accept/Accept-Encoding/
+        # Connection itself, so `setdefault` would leave those four as
+        # "python-requests/x.y" — update() so our values always win.
+        self.session.headers.update(DEFAULT_HEADERS)
 
     def _get(self, path: str, retries: int = 3, **kwargs) -> BeautifulSoup:
         url = path if path.startswith("http") else urljoin(self.base_url, path)
