@@ -8,6 +8,7 @@ from typing import Optional, Union
 
 import questionary
 import requests
+from prompt_toolkit.keys import Keys
 from rich.console import Console
 from rich.table import Table
 
@@ -16,7 +17,9 @@ from nov_cli.reader import render_chapter
 from nov_cli.sites import DEFAULT_SITE, SITES
 from nov_cli.sites.base import Chapter, ChapterRef, SearchResult, Site
 
-CHAPTERS_PER_PAGE = 30
+CHAPTERS_PER_PAGE = 50
+_PREV_PAGE = "__prev__"
+_NEXT_PAGE = "__next__"
 
 console = Console()
 err_console = Console(stderr=True)
@@ -165,8 +168,8 @@ def _resolve_chapter_choice(site: Site, slug: str, choice: Union[int, ChapterRef
 def _prompt_chapter_choice(site: Site, slug: str) -> Optional[Union[int, ChapterRef]]:
     """Where to start reading. Nothing gets fetched until the user picks
     an option — "browse" is the only path that needs the chapter list,
-    and it's paged 30 at a time instead of pulling the whole thing up
-    front (a long-running novel's table of contents can be 30+ requests).
+    and it's paged instead of pulling the whole thing up front (a
+    long-running novel's table of contents can be dozens of requests).
     Returns None if the user backs out (Ctrl-C/Esc or explicit Cancel)."""
     answer = questionary.select(
         "Where do you want to start?",
@@ -208,10 +211,26 @@ def _latest_chapter_ref(site: Site, slug: str) -> Optional[ChapterRef]:
     return last.chapters[-1] if last.chapters else (first.chapters[-1] if first.chapters else None)
 
 
+def _select_paged(title: str, choices: list, *, allow_prev: bool, allow_next: bool):
+    """Like questionary.select(), but Left/Right jump a page back/forward
+    directly — no need to arrow down to a "Previous"/"Next" entry first."""
+    question = questionary.select(title, choices=choices)
+    kb = question.application.key_bindings
+    if allow_prev:
+        @kb.add(Keys.Left, eager=True)
+        def _go_prev(event):
+            event.app.exit(result=_PREV_PAGE)
+    if allow_next:
+        @kb.add(Keys.Right, eager=True)
+        def _go_next(event):
+            event.app.exit(result=_NEXT_PAGE)
+    return question.ask()
+
+
 def _browse_chapters(site: Site, slug: str) -> Optional[Union[int, ChapterRef]]:
     """An arrow-key menu over the table of contents, fetched lazily and
-    shown 30 chapters at a time, so browsing a 3000-chapter novel doesn't
-    mean waiting on 30+ requests before you see anything."""
+    shown a page at a time, so browsing a 3000-chapter novel doesn't
+    mean waiting on dozens of requests before you see anything."""
     cache: list[ChapterRef] = []
     next_site_page = 1
     exhausted = False
@@ -237,28 +256,34 @@ def _browse_chapters(site: Site, slug: str) -> Optional[Union[int, ChapterRef]]:
     while True:
         ensure(start + CHAPTERS_PER_PAGE)
         window = cache[start : start + CHAPTERS_PER_PAGE]
+        has_prev = start > 0
+        has_next = start + CHAPTERS_PER_PAGE < len(cache) or not exhausted
 
         choices = []
-        if start > 0:
-            choices.append(questionary.Choice("◂ Previous 30", value="__prev__"))
+        if has_prev:
+            choices.append(questionary.Choice(f"◂ Previous Page", value=_PREV_PAGE))
         for ref in window:
             choices.append(questionary.Choice(f"{ref.number}. {ref.title}", value=ref))
-        if start + CHAPTERS_PER_PAGE < len(cache) or not exhausted:
-            choices.append(questionary.Choice("▸ Next 30", value="__next__"))
+        if has_next:
+            choices.append(questionary.Choice(f"▸ Next Page", value=_NEXT_PAGE))
         choices.append(questionary.Choice("Jump to latest", value="__latest__"))
         choices.append(questionary.Choice("Pick a chapter number", value="__number__"))
         choices.append(questionary.Choice("Cancel", value="__cancel__"))
 
         known = f"{len(cache)}+" if not exhausted else str(len(cache))
         title = f"Chapters {start + 1}-{start + len(window)} of {known}"
-        answer = questionary.select(title, choices=choices).ask()
+        if has_prev or has_next:
+            title += "  (←/→ to page)"
+
+        console.clear()
+        answer = _select_paged(title, choices, allow_prev=has_prev, allow_next=has_next)
 
         if answer in (None, "__cancel__"):
             return None
-        if answer == "__next__":
+        if answer == _NEXT_PAGE:
             start += CHAPTERS_PER_PAGE
             continue
-        if answer == "__prev__":
+        if answer == _PREV_PAGE:
             start = max(0, start - CHAPTERS_PER_PAGE)
             continue
         if answer == "__latest__":
@@ -278,6 +303,7 @@ def _prompt_index(prompt: str, count: int) -> int:
 
 def _read_session(site: Site, slug: str, chapter: Chapter) -> None:
     while True:
+        console.clear()
         render_chapter(chapter)
         state.save_progress(
             site=site.name,
