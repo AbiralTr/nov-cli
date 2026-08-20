@@ -153,6 +153,10 @@ def _pick_starting_chapter(site: Site, slug: str) -> Optional[Chapter]:
     choice = _prompt_chapter_choice(site, slug)
     if choice is None:
         return None
+    return _resolve_chapter_choice(site, slug, choice)
+
+
+def _resolve_chapter_choice(site: Site, slug: str, choice: Union[int, ChapterRef]) -> Chapter:
     if isinstance(choice, int):
         return site.get_chapter(slug, choice)
     return site.get_chapter_by_url(choice.url)
@@ -289,6 +293,7 @@ def _read_session(site: Site, slug: str, chapter: Chapter) -> None:
             options.append("[cyan]n[/cyan]ext")
         if chapter.prev_url:
             options.append("[cyan]p[/cyan]rev")
+        options.append("[cyan]b[/cyan]rowse chapters")
         options.append("[cyan]q[/cyan]uit")
         console.print(" · ".join(options))
 
@@ -297,10 +302,26 @@ def _read_session(site: Site, slug: str, chapter: Chapter) -> None:
             chapter = _fetch_or_retry(site, chapter.next_url)
         elif choice in ("p", "prev") and chapter.prev_url:
             chapter = _fetch_or_retry(site, chapter.prev_url)
+        elif choice in ("b", "browse"):
+            chapter = _browse_or_stay(site, slug, chapter)
         elif choice in ("q", "quit", ""):
             break
         else:
             console.print("[yellow]Unrecognized choice.[/yellow]")
+
+
+def _browse_or_stay(site: Site, slug: str, current: Chapter) -> Chapter:
+    """Reopen the chapter browser from inside a reading session. Picking a
+    chapter jumps there; cancelling (or a network hiccup) keeps you on the
+    chapter you were already reading instead of losing the session."""
+    try:
+        picked = _browse_chapters(site, slug)
+        if picked is None:
+            return current
+        return _resolve_chapter_choice(site, slug, picked)
+    except requests.RequestException as exc:
+        _print_network_error(exc)
+        return current
 
 
 def _fetch_or_retry(site: Site, url: str) -> Chapter:
