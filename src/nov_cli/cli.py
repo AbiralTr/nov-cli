@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Optional
+from typing import Optional, Union
 
+import questionary
 import requests
 from rich.console import Console
 from rich.table import Table
@@ -15,13 +16,15 @@ from nov_cli.reader import render_chapter
 from nov_cli.sites import DEFAULT_SITE, SITES
 from nov_cli.sites.base import Chapter, ChapterRef, SearchResult, Site
 
+CHAPTERS_PER_PAGE = 30
+
 console = Console()
 err_console = Console(stderr=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="nov",
+        prog="nov-cli",
         description="Search, browse, and read webnovels from your terminal.",
     )
     parser.add_argument("query", nargs="*", help="Novel title to search for")
@@ -117,6 +120,10 @@ def _search_flow(site: Site, query: str, chapter_number: Optional[int] = None) -
     else:
         chapter = _pick_starting_chapter(site, slug)
 
+    if chapter is None:
+        console.print("[dim]Cancelled.[/dim]")
+        return
+
     _read_session(site, slug, chapter)
 
 
@@ -135,7 +142,7 @@ def _pick_result(results: list[SearchResult]) -> SearchResult:
     return results[_prompt_index("Pick a novel", len(results))]
 
 
-def _pick_starting_chapter(site: Site, slug: str) -> Chapter:
+def _pick_starting_chapter(site: Site, slug: str) -> Optional[Chapter]:
     existing = state.get_progress(site.name, slug)
     if existing:
         console.print(
@@ -143,36 +150,118 @@ def _pick_starting_chapter(site: Site, slug: str) -> Chapter:
         )
         return site.get_chapter_by_url(existing["url"])
 
-    console.print("[dim]Fetching chapter list...[/dim]")
+    choice = _prompt_chapter_choice(site, slug)
+    if choice is None:
+        return None
+    if isinstance(choice, int):
+        return site.get_chapter(slug, choice)
+    return site.get_chapter_by_url(choice.url)
+
+
+def _prompt_chapter_choice(site: Site, slug: str) -> Optional[Union[int, ChapterRef]]:
+    """Where to start reading. Nothing gets fetched until the user picks
+    an option — "browse" is the only path that needs the chapter list,
+    and it's paged 30 at a time instead of pulling the whole thing up
+    front (a long-running novel's table of contents can be 30+ requests).
+    Returns None if the user backs out (Ctrl-C/Esc or explicit Cancel)."""
+    answer = questionary.select(
+        "Where do you want to start?",
+        choices=[
+            questionary.Choice("Start from chapter 1", value="first"),
+            questionary.Choice("Jump to latest chapter", value="latest"),
+            questionary.Choice("Pick a chapter number", value="number"),
+            questionary.Choice("Browse chapters", value="browse"),
+        ],
+    ).ask()
+
+    if answer is None:
+        return None
+    if answer == "first":
+        return 1
+    if answer == "number":
+        return _prompt_chapter_number()
+    if answer == "latest":
+        ref = _latest_chapter_ref(site, slug)
+        return ref if ref is not None else 1
+    return _browse_chapters(site, slug)
+
+
+def _prompt_chapter_number() -> int:
+    raw = console.input("Chapter number: ").strip()
     try:
-        chapters = site.list_chapters(slug)
-    except Exception:  # noqa: BLE001
-        chapters = []
-
-    if not chapters:
-        return site.get_chapter(slug, 1)
-
-    console.print(f"[dim]{len(chapters)} chapters found.[/dim]")
-    idx = _prompt_chapter_choice(chapters)
-    return site.get_chapter_by_url(chapters[idx].url)
+        return max(1, int(raw))
+    except ValueError:
+        return 1
 
 
-def _prompt_chapter_choice(chapters: list[ChapterRef]) -> int:
-    console.print("[cyan]1[/cyan]) Start from chapter 1")
-    console.print(f"[cyan]2[/cyan]) Jump to latest ({chapters[-1].title})")
-    console.print("[cyan]3[/cyan]) Pick a chapter number")
-    choice = console.input("[bold]> [/bold]").strip()
-    if choice == "2":
-        return len(chapters) - 1
-    if choice == "3":
-        n = console.input(f"Chapter number (1-{len(chapters)}): ").strip()
-        try:
-            n_int = int(n)
-        except ValueError:
-            n_int = 1
-        n_int = max(1, min(n_int, len(chapters)))
-        return n_int - 1
-    return 0
+def _latest_chapter_ref(site: Site, slug: str) -> Optional[ChapterRef]:
+    """Jump straight to the last page of the table of contents instead of
+    paging through every one before it."""
+    first = site.list_chapters_page(slug, 1)
+    if not first.has_next or not first.last_page or first.last_page == 1:
+        return first.chapters[-1] if first.chapters else None
+    last = site.list_chapters_page(slug, first.last_page)
+    return last.chapters[-1] if last.chapters else (first.chapters[-1] if first.chapters else None)
+
+
+def _browse_chapters(site: Site, slug: str) -> Optional[Union[int, ChapterRef]]:
+    """An arrow-key menu over the table of contents, fetched lazily and
+    shown 30 chapters at a time, so browsing a 3000-chapter novel doesn't
+    mean waiting on 30+ requests before you see anything."""
+    cache: list[ChapterRef] = []
+    next_site_page = 1
+    exhausted = False
+    last_page_hint: Optional[int] = None
+
+    def ensure(count: int) -> None:
+        nonlocal next_site_page, exhausted, last_page_hint
+        while len(cache) < count and not exhausted:
+            result = site.list_chapters_page(slug, next_site_page)
+            cache.extend(result.chapters)
+            last_page_hint = result.last_page or last_page_hint
+            next_site_page += 1
+            if not result.has_next:
+                exhausted = True
+
+    console.print("[dim]Fetching chapters...[/dim]")
+    ensure(CHAPTERS_PER_PAGE)
+    if not cache:
+        console.print("[yellow]No chapter list available — starting from chapter 1.[/yellow]")
+        return 1
+
+    start = 0
+    while True:
+        ensure(start + CHAPTERS_PER_PAGE)
+        window = cache[start : start + CHAPTERS_PER_PAGE]
+
+        choices = []
+        if start > 0:
+            choices.append(questionary.Choice("◂ Previous 30", value="__prev__"))
+        for ref in window:
+            choices.append(questionary.Choice(f"{ref.number}. {ref.title}", value=ref))
+        if start + CHAPTERS_PER_PAGE < len(cache) or not exhausted:
+            choices.append(questionary.Choice("▸ Next 30", value="__next__"))
+        choices.append(questionary.Choice("Jump to latest", value="__latest__"))
+        choices.append(questionary.Choice("Pick a chapter number", value="__number__"))
+        choices.append(questionary.Choice("Cancel", value="__cancel__"))
+
+        known = f"{len(cache)}+" if not exhausted else str(len(cache))
+        title = f"Chapters {start + 1}-{start + len(window)} of {known}"
+        answer = questionary.select(title, choices=choices).ask()
+
+        if answer in (None, "__cancel__"):
+            return None
+        if answer == "__next__":
+            start += CHAPTERS_PER_PAGE
+            continue
+        if answer == "__prev__":
+            start = max(0, start - CHAPTERS_PER_PAGE)
+            continue
+        if answer == "__latest__":
+            return _latest_chapter_ref(site, slug)
+        if answer == "__number__":
+            return _prompt_chapter_number()
+        return answer  # a ChapterRef the user picked directly
 
 
 def _prompt_index(prompt: str, count: int) -> int:

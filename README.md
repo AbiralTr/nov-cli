@@ -14,36 +14,43 @@ cd nov-cli
 pip install -e .
 ```
 
-That gives you a `nov` command, defined in `pyproject.toml`'s `[project.scripts]`. Needs Python 3.9+. If you'd rather it live outside any one project's venv, `pipx install -e .` puts it on your PATH globally.
+That gives you a `nov-cli` command, defined in `pyproject.toml`'s `[project.scripts]`. Needs Python 3.9+. If you'd rather it live outside any one project's venv, `pipx install -e .` puts it on your PATH globally.
 
 ## Usage
 
-Run `nov` with no arguments and you're dropped into a prompt:
+Run `nov-cli` with no arguments and you're dropped into a prompt:
 
 ```sh
-$ nov
+$ nov-cli
 nov-cli — type a novel title to search.
 Commands: c = continue last read, history, q = quit
 
 search> shadow slave
 ```
 
-Type a title, pick a result, pick where to start reading, and go. `n`/`p` move you between chapters; `q` backs out of the chapter and drops you at `search>` again, so you can look something else up without relaunching the command. `c` resumes wherever you last left off, `history` lists everything you've read, and `q` at the prompt exits for real.
+Type a title and pick a result, then choose where to start:
+
+- **Start from chapter 1** — no chapter list fetched, jumps straight in.
+- **Jump to latest chapter** — fetches the last page of the table of contents directly, not the pages before it.
+- **Pick a chapter number** — also skips the listing; goes straight to that chapter's page.
+- **Browse chapters** — an arrow-key menu over the table of contents, 30 chapters at a time. It only fetches enough of the listing to fill the page you're looking at, so paging through a 3,000-chapter novel doesn't mean waiting on the whole table of contents up front.
+
+From there, `n`/`p` move you between chapters; `q` backs out of the chapter and drops you at `search>` again, so you can look something else up without relaunching the command. `c` resumes wherever you last left off, `history` lists everything you've read, and `q` at the prompt exits for real.
 
 If you already know what you want, skip the prompt:
 
 ```sh
-nov shadow slave          # search, pick a result, pick a starting chapter
-nov shadow slave -e 42    # search, then jump straight to chapter 42
-nov -c                    # resume the last novel/chapter you were reading
-nov --history             # list everything you've read
+nov-cli shadow slave          # search, pick a result, pick a starting chapter
+nov-cli shadow slave -e 42    # search, then jump straight to chapter 42
+nov-cli -c                    # resume the last novel/chapter you were reading
+nov-cli --history             # list everything you've read
 ```
 
-Reading progress saves after every chapter to `~/.local/state/nov-cli/history.json`, so `nov -c` picks up exactly where you stopped.
+Reading progress saves after every chapter to `~/.local/state/nov-cli/history.json`, so `nov-cli -c` picks up exactly where you stopped.
 
 ## How it works
 
-Each site lives in its own adapter, `src/nov_cli/sites/<site>.py`, implementing three methods: `search()`, `list_chapters()`, and `get_chapter()` (or `get_chapter_by_url()`). The CLI and the reader don't touch any site-specific HTML themselves — that's the adapter's job, and the only thing you'd need to write to support a new site. Nothing gets cached or redistributed; every chapter is fetched fresh.
+Each site lives in its own adapter, `src/nov_cli/sites/<site>.py`, implementing `search()`, `list_chapters_page()` (a single page of the table of contents, for lazy browsing), `list_chapters()` (the full thing, built on top of `list_chapters_page()`), and `get_chapter()` / `get_chapter_by_url()`. The CLI and the reader don't touch any site-specific HTML themselves — that's the adapter's job, and the only thing you'd need to write to support a new site. Nothing gets cached or redistributed; every chapter is fetched fresh.
 
 To add a site: write a new adapter implementing `Site` from `sites/base.py`, then register it in the `SITES` dict in `sites/__init__.py`.
 

@@ -26,6 +26,17 @@ class ChapterRef:
 
 
 @dataclass
+class ChapterPage:
+    """One page of a site's table-of-contents listing, for lazy/paged
+    browsing instead of fetching every chapter up front."""
+
+    chapters: list[ChapterRef]
+    page: int
+    has_next: bool
+    last_page: Optional[int] = None  # highest page number the site reports, if known
+
+
+@dataclass
 class Chapter:
     """A fetched chapter, ready to read."""
 
@@ -47,6 +58,11 @@ class Site:
         raise NotImplementedError
 
     def list_chapters(self, slug: str) -> list[ChapterRef]:
+        raise NotImplementedError
+
+    def list_chapters_page(self, slug: str, page: int) -> ChapterPage:
+        """Fetch a single page of the table of contents. Lets callers
+        browse or jump around without paying for the full listing."""
         raise NotImplementedError
 
     def get_chapter(self, slug: str, number: int) -> Chapter:

@@ -10,10 +10,11 @@ dependencies = [
     "requests>=2.31",
     "beautifulsoup4>=4.12",
     "rich>=13.7",
+    "questionary>=2.0",
 ]
 
 [project.scripts]
-nov = "nov_cli.cli:main"
+nov-cli = "nov_cli.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -9,7 +9,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from nov_cli.sites.base import Chapter, ChapterRef, SearchResult, Site
+from nov_cli.sites.base import Chapter, ChapterPage, ChapterRef, SearchResult, Site
 
 DEFAULT_HEADERS = {
     "User-Agent": (
@@ -84,29 +84,45 @@ class NovelPhoenix(Site):
         return results
 
     def list_chapters(self, slug: str) -> list[ChapterRef]:
+        """Fetch the full table of contents, one site page at a time.
+        For a long-running novel this can mean dozens of requests — prefer
+        `list_chapters_page` when you don't need every chapter at once."""
         chapters: list[ChapterRef] = []
         page = 1
         while True:
-            soup = self._get(f"/novel/{slug}/chapters", params={"page": page})
-            items = soup.select("ul.chapter-list li a[href]")
-            if not items:
-                break
-            for a in items:
-                no_el = a.select_one(".chapter-no")
-                title_el = a.select_one(".chapter-title")
-                no_text = no_el.get_text(strip=True) if no_el else ""
-                number = int(no_text) if no_text.isdigit() else len(chapters) + 1
-                title = title_el.get_text(strip=True) if title_el else a.get("title", "")
-                chapters.append(
-                    ChapterRef(number=number, title=title, url=urljoin(self.base_url, a["href"]))
-                )
-            pagination = soup.select_one(".pagination")
-            has_next = bool(pagination and pagination.select(f'a[href*="page={page + 1}"]'))
-            if not has_next:
+            result = self.list_chapters_page(slug, page)
+            chapters.extend(result.chapters)
+            if not result.has_next:
                 break
             page += 1
         chapters.sort(key=lambda c: c.number)
         return chapters
+
+    def list_chapters_page(self, slug: str, page: int) -> ChapterPage:
+        soup = self._get(f"/novel/{slug}/chapters", params={"page": page})
+        chapters: list[ChapterRef] = []
+        for a in soup.select("ul.chapter-list li a[href]"):
+            no_el = a.select_one(".chapter-no")
+            title_el = a.select_one(".chapter-title")
+            no_text = no_el.get_text(strip=True) if no_el else ""
+            number = int(no_text) if no_text.isdigit() else len(chapters) + 1
+            title = title_el.get_text(strip=True) if title_el else a.get("title", "")
+            chapters.append(
+                ChapterRef(number=number, title=title, url=urljoin(self.base_url, a["href"]))
+            )
+
+        pagination = soup.select_one(".pagination")
+        has_next = bool(pagination and pagination.select(f'a[href*="page={page + 1}"]'))
+        last_page = None
+        if pagination:
+            page_numbers = [
+                int(text) for a in pagination.select("a[href]")
+                if (text := a.get_text(strip=True)).isdigit()
+            ]
+            if page_numbers:
+                last_page = max(page_numbers)
+
+        return ChapterPage(chapters=chapters, page=page, has_next=has_next, last_page=last_page)
 
     def get_chapter(self, slug: str, number: int) -> Chapter:
         return self.get_chapter_by_url(f"{self.base_url}/novel/{slug}/chapter-{number}")
