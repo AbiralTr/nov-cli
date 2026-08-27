@@ -12,8 +12,6 @@ from rich.text import Text
 
 from nov_cli.sites.base import Chapter
 
-PARAGRAPH_INDENT = "    "  # first-line indent, like a printed page
-
 
 def render_chapter(chapter: Chapter) -> None:
     console = Console(width=100, highlight=False)
@@ -22,8 +20,7 @@ def render_chapter(chapter: Chapter) -> None:
         console.print(Text(chapter.chapter_title, style="bold"))
         console.print()
         for paragraph in chapter.paragraphs:
-            console.print(PARAGRAPH_INDENT + paragraph, style="default")
-            console.print()
+            console.print(paragraph, style="default")
             console.print()
     _page(capture.get())
 

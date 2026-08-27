@@ -34,6 +34,7 @@ Type a title and pick a result from the arrow-key menu, then choose where to sta
 - **Jump to latest chapter** — fetches the last page of the table of contents directly, not the pages before it.
 - **Pick a chapter number** — also skips the listing; goes straight to that chapter's page.
 - **Browse chapters** — a menu over the table of contents, 50 chapters at a time; ←/→ jump a page back or forward directly, no need to arrow down to a "next page" entry. It only fetches enough of the listing to fill the page you're looking at, so paging through a 3,000-chapter novel doesn't mean waiting on the whole table of contents up front.
+- **Search chapter text** — remember a line but not which chapter it's in? Give it a phrase (case-insensitive) and, optionally, a chapter to start from, and it fetches chapters one by one until it finds a match or runs out. Ctrl-C stops the search without losing your place.
 
 Escape backs out a level at every one of those menus — same as picking Cancel, just faster.
 

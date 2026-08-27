@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from typing import Optional, Union
 
 import questionary
@@ -175,6 +176,7 @@ def _prompt_chapter_choice(site: Site, slug: str) -> Optional[Union[int, Chapter
             questionary.Choice("Jump to latest chapter", value="latest"),
             questionary.Choice("Pick a chapter number", value="number"),
             questionary.Choice("Browse chapters", value="browse"),
+            questionary.Choice("Search chapter text", value="search"),
         ],
     )
 
@@ -187,6 +189,8 @@ def _prompt_chapter_choice(site: Site, slug: str) -> Optional[Union[int, Chapter
     if answer == "latest":
         ref = _latest_chapter_ref(site, slug)
         return ref if ref is not None else 1
+    if answer == "search":
+        return _search_chapter_text(site, slug)
     return _browse_chapters(site, slug)
 
 
@@ -206,6 +210,59 @@ def _latest_chapter_ref(site: Site, slug: str) -> Optional[ChapterRef]:
         return first.chapters[-1] if first.chapters else None
     last = site.list_chapters_page(slug, first.last_page)
     return last.chapters[-1] if last.chapters else (first.chapters[-1] if first.chapters else None)
+
+
+def _search_chapter_text(site: Site, slug: str) -> Optional[ChapterRef]:
+    """Search chapter bodies for a phrase, case-insensitive, one chapter
+    at a time from a given starting point. For when you remember a line
+    but not which chapter it's in — Ctrl-C stops without losing your
+    place at the menu above."""
+    term = console.input("Search for (case-insensitive): ").strip()
+    if not term:
+        return None
+    term_lower = term.lower()
+
+    raw_start = console.input("Start from chapter [1]: ").strip()
+    try:
+        start_n = max(1, int(raw_start)) if raw_start else 1
+    except ValueError:
+        start_n = 1
+
+    latest = _latest_chapter_ref(site, slug)
+    end_n = latest.number if latest else None
+    span = f" to {end_n}" if end_n else ""
+    console.print(f'[dim]Searching chapter {start_n}{span} for "{term}"... Ctrl-C to stop.[/dim]')
+
+    consecutive_failures = 0
+    n = start_n
+    try:
+        while end_n is None or n <= end_n:
+            try:
+                chapter = site.get_chapter(slug, n)
+                consecutive_failures = 0
+            except requests.RequestException as exc:
+                consecutive_failures += 1
+                _print_network_error(exc)
+                if consecutive_failures >= 5:
+                    console.print("[red]Too many failures in a row — stopping search.[/red]")
+                    return None
+                n += 1
+                continue
+
+            if term_lower in " ".join(chapter.paragraphs).lower():
+                console.print(f"[green]Found in chapter {n}[/green] — {chapter.chapter_title}")
+                return ChapterRef(number=n, title=chapter.chapter_title, url=chapter.url)
+
+            if n % 20 == 0:
+                console.print(f"[dim]checked through chapter {n}...[/dim]")
+            n += 1
+            time.sleep(0.2)  # keep the pace polite over a long search
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Search stopped.[/yellow]")
+        return None
+
+    console.print("[yellow]No match found.[/yellow]")
+    return None
 
 
 def _select(title: str, choices: list, *, allow_prev: bool = False, allow_next: bool = False):
